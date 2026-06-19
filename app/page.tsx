@@ -1,5 +1,5 @@
 "use client";
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { toPng } from 'html-to-image'; 
 
 const convertNumberToWords = (amount: number) => {
@@ -27,15 +27,40 @@ const convertNumberToWords = (amount: number) => {
 
 export default function InvoiceGenerator() {
   const invoiceRef = useRef<HTMLDivElement>(null); 
+  const [isMounted, setIsMounted] = useState(false);
+
   const [formData, setFormData] = useState({
     customerName: "",
     invoiceNo: "",
     date: "",
   });
 
-  const [items, setItems] = useState([{ id: 1, particulars: "", qty: 1, rate: 0 }]);
+  const [items, setItems] = useState([{ id: 1, particulars: "", qty: "", rate: "" }]);
 
-  const addItem = () => setItems([...items, { id: items.length + 1, particulars: "", qty: 1, rate: 0 }]);
+  useEffect(() => {
+    setIsMounted(true);
+    
+    const savedFormData = localStorage.getItem("invoiceFormData");
+    if (savedFormData) {
+      setFormData(JSON.parse(savedFormData));
+    } else {
+      setFormData({ customerName: "", invoiceNo: "", date: new Date().toISOString().split('T')[0] });
+    }
+
+    const savedItems = localStorage.getItem("invoiceItems");
+    if (savedItems) {
+      setItems(JSON.parse(savedItems));
+    }
+  }, []);
+
+  useEffect(() => {
+    if (isMounted) {
+      localStorage.setItem("invoiceFormData", JSON.stringify(formData));
+      localStorage.setItem("invoiceItems", JSON.stringify(items));
+    }
+  }, [formData, items, isMounted]);
+
+  const addItem = () => setItems([...items, { id: Date.now(), particulars: "", qty: "", rate: "" }]);
 
   const removeItem = (index: number) => {
     const newItems = [...items];
@@ -49,40 +74,39 @@ export default function InvoiceGenerator() {
     setItems(newItems);
   };
 
+  const clearForm = () => {
+    if (window.confirm("सगळा जुना डेटा डिलीट करून नवीन बिल बनवायचं आहे का?")) {
+      setFormData({ customerName: "", invoiceNo: "", date: new Date().toISOString().split('T')[0] });
+      setItems([{ id: Date.now(), particulars: "", qty: "", rate: "" }]);
+      localStorage.removeItem("invoiceFormData");
+      localStorage.removeItem("invoiceItems");
+    }
+  };
+
   const downloadAsImage = async () => {
     if (invoiceRef.current === null) return;
-    
     try {
       const dataUrl = await toPng(invoiceRef.current, { cacheBust: true, pixelRatio: 2 });
       const link = document.createElement("a");
       link.download = `Invoice_${formData.invoiceNo || "Bill"}.png`;
       link.href = dataUrl;
       link.click();
-    } catch (err) {
-      console.error("Oops, something went wrong!", err);
-    }
+    } catch (err) { console.error("Oops, something went wrong!", err); }
   };
 
   const shareInvoice = async () => {
     if (invoiceRef.current === null) return;
-
     try {
       const dataUrl = await toPng(invoiceRef.current, { cacheBust: true, pixelRatio: 2 });
-      
       const response = await fetch(dataUrl);
       const blob = await response.blob();
       const file = new File([blob], `Invoice_${formData.invoiceNo || "Bill"}.png`, { type: blob.type });
 
       if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
         try {
-          await navigator.share({
-            title: 'Invoice from Shekhar Kalekar',
-            files: [file]
-          });
+          await navigator.share({ title: 'Invoice from Shekhar Kalekar', files: [file] });
           return; 
-        } catch (e) {
-          console.log("Share cancelled by user");
-        }
+        } catch (e) { console.log("Share cancelled by user"); }
       } else {
         try {
           const clipboardItem = new ClipboardItem({ [blob.type]: blob });
@@ -95,31 +119,42 @@ export default function InvoiceGenerator() {
           link.click();
         }
       }
-    } catch (err) {
-      console.error("Error sharing invoice:", err);
-    }
+    } catch (err) { console.error("Error sharing invoice:", err); }
   };
 
-  const grandTotal = items.reduce((sum, item) => sum + (item.qty * item.rate), 0);
-  const totalQty = items.reduce((sum, item) => sum + Number(item.qty), 0);
+  const grandTotal = items.reduce((sum, item) => sum + ((Number(item.qty) || 0) * (Number(item.rate) || 0)), 0);
+  const totalQty = items.reduce((sum, item) => sum + (Number(item.qty) || 0), 0);
   const amountInWordsAuto = convertNumberToWords(grandTotal);
+
+  if (!isMounted) return null; 
 
   return (
     <div className="min-h-screen bg-slate-100 p-4 md:p-10 flex flex-col items-center font-sans text-black">
       
       {/* Input Form */}
       <div className="w-full max-w-4xl bg-white p-6 rounded-xl shadow-lg mb-10 print:hidden border-t-4 border-blue-500">
-        <h2 className="text-xl font-bold mb-6 text-slate-800 border-b pb-2">Enter Invoice Details</h2>
+        
+        {/* इथे हेडिंगच्या बाजूला एक छोटं 'Clear Form' चं बटण लावलं आहे */}
+        <div className="flex justify-between items-center border-b pb-2 mb-6">
+          <h2 className="text-xl font-bold text-slate-800">Enter Invoice Details</h2>
+          <button 
+            onClick={clearForm}
+            className="text-xs bg-gray-200 text-gray-700 px-3 py-2 rounded hover:bg-gray-300 font-bold transition-all uppercase tracking-wider"
+          >
+            ↻ Clear Form
+          </button>
+        </div>
+        
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div className="md:col-span-2">
             <label className="block text-sm font-medium text-gray-700">Customer Name & Address (M/s.)</label>
-            <textarea rows={2} className="w-full border p-2 rounded mt-1 text-black" onChange={(e) => setFormData({...formData, customerName: e.target.value})} />
+            <textarea rows={2} className="w-full border p-2 rounded mt-1 text-black" value={formData.customerName} onChange={(e) => setFormData({...formData, customerName: e.target.value})} />
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700">Invoice No. / Date</label>
             <div className="flex gap-2">
-              <input type="text" placeholder="No." className="w-1/2 border p-2 rounded mt-1 text-black" onChange={(e) => setFormData({...formData, invoiceNo: e.target.value})} />
-              <input type="date" className="w-1/2 border p-2 rounded mt-1 text-black" onChange={(e) => setFormData({...formData, date: e.target.value})} />
+              <input type="text" placeholder="No." className="w-1/2 border p-2 rounded mt-1 text-black" value={formData.invoiceNo} onChange={(e) => setFormData({...formData, invoiceNo: e.target.value})} />
+              <input type="date" className="w-1/2 border p-2 rounded mt-1 text-black" value={formData.date} onChange={(e) => setFormData({...formData, date: e.target.value})} />
             </div>
           </div>
         </div>
@@ -128,9 +163,9 @@ export default function InvoiceGenerator() {
           <label className="block text-sm font-medium text-gray-700 mb-1">Particulars (Items)</label>
           {items.map((item, index) => (
             <div key={item.id} className="flex gap-2 mb-2">
-              <input type="text" placeholder="Particulars" className="flex-1 border p-2 rounded text-black" onChange={(e) => handleItemChange(index, 'particulars', e.target.value)} />
-              <input type="number" placeholder="Qty" className="w-20 border p-2 rounded text-black" onChange={(e) => handleItemChange(index, 'qty', Number(e.target.value))} />
-              <input type="number" placeholder="Rate" className="w-32 border p-2 rounded text-black" onChange={(e) => handleItemChange(index, 'rate', Number(e.target.value))} />
+              <input type="text" placeholder="Particulars" className="flex-1 border p-2 rounded text-black" value={item.particulars} onChange={(e) => handleItemChange(index, 'particulars', e.target.value)} />
+              <input type="number" placeholder="Qty" className="w-20 border p-2 rounded text-black" value={item.qty} onChange={(e) => handleItemChange(index, 'qty', e.target.value === "" ? "" : Number(e.target.value))} />
+              <input type="number" placeholder="Rate" className="w-32 border p-2 rounded text-black" value={item.rate} onChange={(e) => handleItemChange(index, 'rate', e.target.value === "" ? "" : Number(e.target.value))} />
               <button onClick={() => removeItem(index)} className="bg-red-500 text-white px-3 py-1 rounded font-bold hover:bg-red-700 flex items-center justify-center text-lg">-</button>
             </div>
           ))}
@@ -142,7 +177,6 @@ export default function InvoiceGenerator() {
           <input type="text" className="w-full border p-2 rounded mt-1 text-black bg-gray-100 font-bold" value={amountInWordsAuto} readOnly />
         </div>
 
-        {/* Buttons Row */}
         <div className="flex flex-wrap gap-4 mt-8">
           <button onClick={() => window.print()} className="flex-1 min-w-[150px] bg-blue-600 text-white py-3 rounded-lg font-bold hover:bg-blue-700 transition-all shadow-md uppercase tracking-wider">
             Print / PDF
@@ -199,7 +233,7 @@ export default function InvoiceGenerator() {
                 <td className="border-r border-black text-center py-2">{index + 1}.</td>
                 <td className="border-r border-black px-4 py-2 font-medium italic uppercase">{item.particulars}</td>
                 <td className="border-r border-black text-center py-2">{item.qty}</td>
-                <td className="text-center py-2 font-bold">{(item.qty * item.rate).toFixed(2)}</td>
+                <td className="text-center py-2 font-bold">{((Number(item.qty) || 0) * (Number(item.rate) || 0)).toFixed(2)}</td>
               </tr>
             ))}
             <tr className="flex-1 border-b border-black">
@@ -225,7 +259,6 @@ export default function InvoiceGenerator() {
             <p className="text-xs font-bold uppercase underline">Amount in Words:</p>
             <p className="text-sm italic font-semibold mt-1 text-slate-700 uppercase">{amountInWordsAuto}</p>
             
-            {/* क्यूआर आणि Bank Details चा सेक्शन - इथे items-start केले आहे */}
             <div className="mt-4 flex gap-4 items-start">
               <div className="flex flex-col items-center">
                 <div className="w-28 h-28 border border-black p-1 flex items-center justify-center bg-gray-50">
@@ -236,7 +269,6 @@ export default function InvoiceGenerator() {
                 <p className="text-[10px] font-bold mt-1 text-gray-600 uppercase tracking-tighter text-center">tap on qr to direct payment</p>
               </div>
               
-              {/* अचूक Bank Details */}
               <div className="text-[12px] leading-snug text-gray-800">
                 <p className="font-bold underline uppercase mb-1 text-[13px]">Bank Details For Payment:</p>
                 <p><span className="font-bold">Name:</span> Shekhar Tanaji Kalekar</p>
