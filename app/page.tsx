@@ -63,7 +63,6 @@ export default function InvoiceGenerator() {
     }
   };
 
-  // अपडेटेड शेअर फंक्शन (Copy to Clipboard जुगाड)
   const shareInvoice = async () => {
     if (invoiceRef.current === null) return;
 
@@ -74,25 +73,22 @@ export default function InvoiceGenerator() {
       const blob = await response.blob();
       const file = new File([blob], `Invoice_${formData.invoiceNo || "Bill"}.png`, { type: blob.type });
 
-      // १. मोबाईलवर असल्यास डायरेक्ट शेअर होईल
-      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
         try {
           await navigator.share({
             title: 'Invoice from Shekhar Kalekar',
             files: [file]
           });
-          return; // शेअर झालं!
+          return; 
         } catch (e) {
           console.log("Share cancelled by user");
         }
       } else {
-        // २. लॅपटॉपवर असल्यास फोटो 'Copy' होईल
         try {
           const clipboardItem = new ClipboardItem({ [blob.type]: blob });
           await navigator.clipboard.write([clipboardItem]);
           alert("✅ The bill photo has been copied! Now open WhatsApp and paste it there.");
         } catch (clipboardError) {
-          // जर कॉपी पण नाही झालं, तरच शेवटचा पर्याय म्हणून डाऊनलोड
           const link = document.createElement("a");
           link.download = `Invoice_${formData.invoiceNo || "Bill"}.png`;
           link.href = dataUrl;
@@ -222,11 +218,45 @@ export default function InvoiceGenerator() {
           </tfoot>
         </table>
 
+        {/* Footer Area */}
         <div className="mt-8 flex justify-between items-end">
+          
           <div className="w-3/5">
             <p className="text-xs font-bold uppercase underline">Amount in Words:</p>
             <p className="text-sm italic font-semibold mt-1 text-slate-700 uppercase">{amountInWordsAuto}</p>
+            
+            {/* क्यूआर आणि Bank Details चा सेक्शन - इथे items-start केले आहे */}
+            <div className="mt-4 flex gap-4 items-start">
+              <div className="flex flex-col items-center">
+                <div className="w-28 h-28 border border-black p-1 flex items-center justify-center bg-gray-50">
+                  <a href="upi://pay?pa=shekharkalekar22-1@okhdfcbank&pn=Shekhar%20Tanaji%20Kalekar&cu=INR" className="w-full h-full block">
+                    <img src="/qr.png" alt="QR Code" className="max-w-full max-h-full object-contain block mx-auto" />
+                  </a>
+                </div>
+                <p className="text-[10px] font-bold mt-1 text-gray-600 uppercase tracking-tighter text-center">tap on qr to direct payment</p>
+              </div>
+              
+              {/* अचूक Bank Details */}
+              <div className="text-[12px] leading-snug text-gray-800">
+                <p className="font-bold underline uppercase mb-1 text-[13px]">Bank Details For Payment:</p>
+                <p><span className="font-bold">Name:</span> Shekhar Tanaji Kalekar</p>
+                <p><span className="font-bold">Bank:</span> Abhyudaya CO-OP. Bank LTD</p>
+                <p><span className="font-bold">A/C No:</span> 004011100080789</p>
+                <p><span className="font-bold">IFSC:</span> ABHY0065004</p>
+                <p>
+                  <span className="font-bold">UPI ID:</span>{" "}
+                  <a 
+                    href="upi://pay?pa=shekharkalekar22-1@okhdfcbank&pn=Shekhar%20Tanaji%20Kalekar&cu=INR" 
+                    className="text-blue-600 hover:underline hover:text-blue-800 transition-colors"
+                  >
+                    shekharkalekar22-1@okhdfcbank
+                  </a>
+                </p>
+              </div>
+            </div>
+            
           </div>
+          
           <div className="text-center flex flex-col items-center">
             <p className="text-[10px] font-bold mb-1 uppercase tracking-tighter">For SHEKHAR KALEKAR</p>
             <div className="h-16 w-40 flex items-center justify-center">
@@ -234,6 +264,7 @@ export default function InvoiceGenerator() {
             </div>
             <div className="w-40 border-t border-black pt-1 mt-1 font-bold text-[10px] uppercase text-center">Proprietor / Signature</div>
           </div>
+          
         </div>
       </div>
     </div>
