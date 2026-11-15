@@ -7,7 +7,7 @@ const convertNumberToWords = (amount: number) => {
   if (amount === 0) return "Zero Rupees Only";
   const a = ["", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten", "Eleven", "Twelve", "Thirteen", "Fourteen", "Fifteen", "Sixteen", "Seventeen", "Eighteen", "Nineteen"];
   const b = ["", "", "Twenty", "Thirty", "Forty", "Fifty", "Sixty", "Seventy", "Eighty", "Ninety"];
-  
+
   const numToWords = (n: number) => {
     let str = "";
     if (n > 99) { str += a[Math.floor(n / 100)] + " Hundred "; n %= 100; }
@@ -22,7 +22,7 @@ const convertNumberToWords = (amount: number) => {
   if (n > 99999) { result += numToWords(Math.floor(n / 100000)) + "Lakh "; n %= 100000; }
   if (n > 999) { result += numToWords(Math.floor(n / 1000)) + "Thousand "; n %= 1000; }
   if (n > 0) { result += numToWords(n); }
-  
+
   return result.trim() + " Rupees Only";
 };
 
@@ -31,7 +31,11 @@ export default function InvoiceGenerator() {
   const qrLinkRef = useRef<HTMLAnchorElement>(null);
   const upiTextLinkRef = useRef<HTMLAnchorElement>(null);
   const [isMounted, setIsMounted] = useState(false);
-  
+
+  // State for handling PDF HTTPS-to-UPI Redirect
+  const [isRedirecting, setIsRedirecting] = useState(false);
+  const [redirectUpiUrl, setRedirectUpiUrl] = useState("");
+
   // Security Authentication State
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [securityPin, setSecurityPin] = useState("");
@@ -55,12 +59,28 @@ export default function InvoiceGenerator() {
 
   useEffect(() => {
     setIsMounted(true);
-    
+
+    // Check if opened via PDF Payment Link (?pay=1&am=...)
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get("pay") === "1") {
+        const am = params.get("am");
+        const targetUpi = am && Number(am) > 0
+          ? `upi://pay?pa=shekharkalekar22-1@okhdfcbank&pn=Shekhar%20Tanaji%20Kalekar&am=${am}&cu=INR`
+          : `upi://pay?pa=shekharkalekar22-1@okhdfcbank&pn=Shekhar%20Tanaji%20Kalekar&cu=INR`;
+        
+        setRedirectUpiUrl(targetUpi);
+        setIsRedirecting(true);
+        window.location.href = targetUpi;
+        return;
+      }
+    }
+
     // Check if device is already authenticated
     if (localStorage.getItem("invoiceAuth") === "true") {
       setIsAuthenticated(true);
     }
-    
+
     const today = getTodayDate();
     const savedFormData = localStorage.getItem("invoiceFormData");
     if (savedFormData) {
@@ -75,7 +95,7 @@ export default function InvoiceGenerator() {
     if (savedItems) {
       setItems(JSON.parse(savedItems));
     }
-    
+
     const savedShowItemDate = localStorage.getItem("invoiceShowItemDate");
     if (savedShowItemDate) {
       setShowItemDate(JSON.parse(savedShowItemDate));
@@ -93,20 +113,20 @@ export default function InvoiceGenerator() {
   const handleLogin = () => {
     if (securityPin === "9702" || securityPin === process.env.NEXT_PUBLIC_APP_PIN) {
       setIsChecking(true);
-      
+
       // Step 1: Show authenticating... then start printing
       setTimeout(() => {
         setIsChecking(false);
         setSecurityPin("");
         setIsAuthenticated(true);
         setIsAnimating(true); // Start printer animation
-        
+
         // Step 2: Stop animation and save session after paper rolls out
         setTimeout(() => {
           setIsAnimating(false);
           localStorage.setItem("invoiceAuth", "true");
         }, 2800); // Wait 2.8 seconds for smooth paper roll
-        
+
       }, 800);
     } else {
       alert("❌ Wrong Security PIN!");
@@ -155,15 +175,18 @@ export default function InvoiceGenerator() {
     ? `upi://pay?pa=shekharkalekar22-1@okhdfcbank&pn=Shekhar%20Tanaji%20Kalekar&am=${grandTotal.toFixed(2)}&cu=INR`
     : `upi://pay?pa=shekharkalekar22-1@okhdfcbank&pn=Shekhar%20Tanaji%20Kalekar&cu=INR`;
 
-  // Dynamic QR Image URL that embeds the exact Grand Total inside the QR code itself for PDF scanning
-  const dynamicQrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=250x250&margin=1&data=${encodeURIComponent(upiLink)}`;
-
-  // PDF madhe QR Code ani UPI ID var clickable link basavnyasathi helper function
+  // PDF madhe QR Code ani UPI ID var clickable HTTPS link basavnyasathi helper function
   const addPdfLinks = (pdf: jsPDF) => {
     if (!invoiceRef.current) return;
     const invoiceRect = invoiceRef.current.getBoundingClientRect();
     const scaleX = 210 / invoiceRect.width;
     const scaleY = 297 / invoiceRect.height;
+
+    // PDF Viewers upi:// block kartat mhanun website chi https:// link dili ahe ji auto-redirect karel
+    const origin = typeof window !== "undefined" ? window.location.origin + window.location.pathname : "";
+    const pdfPaymentUrl = grandTotal > 0
+      ? `${origin}?pay=1&am=${grandTotal.toFixed(2)}`
+      : `${origin}?pay=1`;
 
     if (qrLinkRef.current) {
       const qrRect = qrLinkRef.current.getBoundingClientRect();
@@ -171,8 +194,7 @@ export default function InvoiceGenerator() {
       const y = (qrRect.top - invoiceRect.top) * scaleY;
       const w = qrRect.width * scaleX;
       const h = qrRect.height * scaleY;
-      pdf.link(x, y, w, h, { url: upiLink });
-      pdf.textWithLink("   ", x + 2, y + h / 2, { url: upiLink });
+      pdf.link(x, y, w, h, { url: pdfPaymentUrl });
     }
 
     if (upiTextLinkRef.current) {
@@ -181,8 +203,7 @@ export default function InvoiceGenerator() {
       const y = (upiRect.top - invoiceRect.top) * scaleY;
       const w = upiRect.width * scaleX;
       const h = upiRect.height * scaleY;
-      pdf.link(x, y, w, h, { url: upiLink });
-      pdf.textWithLink("                    ", x, y + h - 1, { url: upiLink });
+      pdf.link(x, y, w, h, { url: pdfPaymentUrl });
     }
   };
 
@@ -215,7 +236,7 @@ export default function InvoiceGenerator() {
       });
       pdf.addImage(dataUrl, 'PNG', 0, 0, 210, 297);
       addPdfLinks(pdf); // Adds clickable links inside shared PDF
-      
+
       const pdfBlob = pdf.output('blob');
       const file = new File([pdfBlob], `Invoice_${formData.invoiceNo || "Bill"}.pdf`, { type: 'application/pdf' });
 
@@ -294,6 +315,24 @@ export default function InvoiceGenerator() {
 
   if (!isMounted) return null; 
 
+  // --- Auto-Redirect Screen for Customer Clicking from PDF ---
+  if (isRedirecting) {
+    return (
+      <div className="min-h-screen bg-slate-100 flex flex-col items-center justify-center font-sans p-4 text-center">
+        <div className="bg-white p-8 rounded-xl shadow-xl w-full max-w-sm border-t-4 border-green-600">
+          <h2 className="text-xl font-black text-gray-800 mb-2 uppercase">Opening UPI App...</h2>
+          <p className="text-sm text-gray-600 mb-6">Redirecting to GPay / PhonePe / Paytm for payment.</p>
+          <a 
+            href={redirectUpiUrl}
+            className="w-full block bg-green-600 hover:bg-green-700 text-white py-3 rounded-lg font-bold uppercase tracking-wider shadow-md transition-all"
+          >
+            Pay Now via UPI
+          </a>
+        </div>
+      </div>
+    );
+  }
+
   // --- Security Login Screen ---
   if (!isAuthenticated) {
     return (
@@ -301,7 +340,7 @@ export default function InvoiceGenerator() {
         <div className="bg-white p-8 rounded-xl shadow-xl w-full max-w-sm text-center border-t-4 border-blue-600 transition-all">
           <h2 className="text-2xl font-black text-gray-800 mb-2 uppercase">Security Check</h2>
           <p className="text-sm text-gray-500 mb-6">Please enter your PIN to access the billing app.</p>
-          
+
           <input 
             type="password" 
             placeholder="Enter PIN" 
@@ -311,7 +350,7 @@ export default function InvoiceGenerator() {
             onKeyDown={(e) => e.key === 'Enter' && handleLogin()}
             disabled={isChecking}
           />
-          
+
           <button 
             onClick={handleLogin}
             disabled={isChecking}
@@ -327,7 +366,7 @@ export default function InvoiceGenerator() {
   // --- Main Invoice App ---
   return (
     <div className="min-h-screen bg-slate-100 p-4 md:p-10 print:p-0 print:block flex flex-col items-center font-sans text-black relative print:min-h-0">
-      
+
       {/* 🖨️ PRINTER ANIMATION GRAPHIC (Shows only when unlocking) */}
       {isAnimating && (
         <div className="w-full max-w-4xl flex flex-col items-center relative z-30 mb-[-10px] print:hidden">
@@ -370,12 +409,12 @@ export default function InvoiceGenerator() {
       */}
       <div className={`w-full flex flex-col items-center ${isAnimating ? 'overflow-hidden z-20' : ''}`}>
         <div className={`w-full flex flex-col items-center ${isAnimating ? 'animate-print-paper' : ''}`}>
-          
+
           {/* Input Form */}
           <div className="w-full max-w-4xl bg-white p-6 rounded-xl shadow-lg mb-10 print:hidden border-t-4 border-blue-500 relative">
             <div className="flex justify-between items-center border-b pb-2 mb-6">
               <h2 className="text-xl font-bold text-slate-800">Enter Invoice Details</h2>
-              
+
               <div className="flex gap-2">
                 <button 
                   onClick={lockApp}
@@ -391,7 +430,7 @@ export default function InvoiceGenerator() {
                 </button>
               </div>
             </div>
-            
+
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div className="md:col-span-2">
                 <label className="block text-sm font-medium text-gray-700">Customer Name & Address (M/s.)</label>
@@ -469,7 +508,7 @@ export default function InvoiceGenerator() {
                 <p className="text-sm text-gray-600 mb-6 font-medium">
                   Choose the format to {actionType === 'download' ? "download" : "share"}:
                 </p>
-                
+
                 <div className="flex flex-col gap-3">
                   <button
                     onClick={() => handleActionSelection("pdf")}
@@ -570,11 +609,11 @@ export default function InvoiceGenerator() {
 
                 {/* Footer Area */}
                 <div className="mt-8 flex justify-between items-end">
-                  
+
                   <div className="w-3/5">
                     <p className="text-xs font-bold uppercase underline">Amount in Words:</p>
                     <p className="text-sm italic font-semibold mt-1 text-slate-700 uppercase">{amountInWordsAuto}</p>
-                    
+
                     <div className="mt-4 flex gap-4 items-start">
                       <div className="flex flex-col items-center">
                         <a 
@@ -586,17 +625,11 @@ export default function InvoiceGenerator() {
                           }}
                           className="w-28 h-28 border border-black p-1 flex items-center justify-center bg-gray-50 cursor-pointer block"
                         >
-                          <img 
-                            src={dynamicQrUrl} 
-                            crossOrigin="anonymous"
-                            onError={(e) => { e.currentTarget.src = "/qr.png"; }}
-                            alt="QR Code" 
-                            className="max-w-full max-h-full object-contain block mx-auto pointer-events-none" 
-                          />
+                          <img src="/qr.png" alt="QR Code" className="max-w-full max-h-full object-contain block mx-auto pointer-events-none" />
                         </a>
                         <p className="text-[10px] font-bold mt-1 text-gray-600 uppercase tracking-tighter text-center">tap on qr to direct payment</p>
                       </div>
-                      
+
                       <div className="text-[12px] leading-snug text-gray-800">
                         <p className="font-bold underline uppercase mb-1 text-[13px]">Bank Details For Payment:</p>
                         <p><span className="font-bold">Name:</span> Shekhar Tanaji Kalekar</p>
@@ -619,9 +652,9 @@ export default function InvoiceGenerator() {
                         </p>
                       </div>
                     </div>
-                    
+
                   </div>
-                  
+
                   <div className="text-center flex flex-col items-center">
                     <p className="text-[10px] font-bold mb-1 uppercase tracking-tighter">For SHEKHAR KALEKAR</p>
                     <div className="h-16 w-40 flex items-center justify-center">
@@ -629,13 +662,13 @@ export default function InvoiceGenerator() {
                     </div>
                     <div className="w-40 border-t border-black pt-1 mt-1 font-bold text-[10px] uppercase text-center">Proprietor / Signature</div>
                   </div>
-                  
+
                 </div>
               </div>
             </div>
           </div>
           {/* End of Bill */}
-          
+
         </div>
       </div>
     </div>
