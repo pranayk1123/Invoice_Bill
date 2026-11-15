@@ -26,6 +26,18 @@ const convertNumberToWords = (amount: number) => {
   return result.trim() + " Rupees Only";
 };
 
+// Quick chips for fast typing on mobile/desktop
+const QUICK_ITEMS = [
+  "Printer Servicing",
+  "Toner Refilling",
+  "Cartridge Replace",
+  "Teflon & Pressure Roller",
+  "Laptop Formatting & OS",
+  "Laptop Servicing",
+  "LCD / Display Repair",
+  "Logic Card / Power Repair"
+];
+
 export default function InvoiceGenerator() {
   const invoiceRef = useRef<HTMLDivElement>(null); 
   const qrLinkRef = useRef<HTMLAnchorElement>(null);
@@ -48,7 +60,7 @@ export default function InvoiceGenerator() {
 
   const [formData, setFormData] = useState({
     customerName: "",
-    invoiceNo: "",
+    invoiceNo: "101",
     date: getTodayDate(),
   });
 
@@ -56,6 +68,12 @@ export default function InvoiceGenerator() {
   const [showItemDate, setShowItemDate] = useState(false);
 
   const [items, setItems] = useState([{ id: 1, itemDate: "", particulars: "", qty: "", rate: "" }]);
+
+  // --- NEW FEATURES STATES ---
+  const [customerMobile, setCustomerMobile] = useState("");
+  const [isPaid, setIsPaid] = useState(false);
+  const [recentBills, setRecentBills] = useState<any[]>([]);
+  const [activeRowIndex, setActiveRowIndex] = useState<number>(0);
 
   useEffect(() => {
     setIsMounted(true);
@@ -88,7 +106,7 @@ export default function InvoiceGenerator() {
       // Always set today's date automatically when opening the app
       setFormData({ ...parsedData, date: today });
     } else {
-      setFormData({ customerName: "", invoiceNo: "", date: today });
+      setFormData({ customerName: "", invoiceNo: "101", date: today });
     }
 
     const savedItems = localStorage.getItem("invoiceItems");
@@ -100,6 +118,15 @@ export default function InvoiceGenerator() {
     if (savedShowItemDate) {
       setShowItemDate(JSON.parse(savedShowItemDate));
     }
+
+    const savedMobile = localStorage.getItem("invoiceCustomerMobile");
+    if (savedMobile) setCustomerMobile(savedMobile);
+
+    const savedIsPaid = localStorage.getItem("invoiceIsPaid");
+    if (savedIsPaid) setIsPaid(JSON.parse(savedIsPaid));
+
+    const savedHistory = localStorage.getItem("invoiceRecentBills");
+    if (savedHistory) setRecentBills(JSON.parse(savedHistory));
   }, []);
 
   useEffect(() => {
@@ -107,8 +134,10 @@ export default function InvoiceGenerator() {
       localStorage.setItem("invoiceFormData", JSON.stringify(formData));
       localStorage.setItem("invoiceItems", JSON.stringify(items));
       localStorage.setItem("invoiceShowItemDate", JSON.stringify(showItemDate));
+      localStorage.setItem("invoiceCustomerMobile", customerMobile);
+      localStorage.setItem("invoiceIsPaid", JSON.stringify(isPaid));
     }
-  }, [formData, items, showItemDate, isMounted, isAuthenticated]);
+  }, [formData, items, showItemDate, customerMobile, isPaid, isMounted, isAuthenticated]);
 
   const handleLogin = () => {
     if (securityPin === "9702" || securityPin === process.env.NEXT_PUBLIC_APP_PIN) {
@@ -141,12 +170,21 @@ export default function InvoiceGenerator() {
     alert("🔒 App is now Locked!");
   };
 
-  const addItem = () => setItems([...items, { id: Date.now(), itemDate: "", particulars: "", qty: "", rate: "" }]);
+  const addItem = () => {
+    const nextIndex = items.length;
+    setItems([...items, { id: Date.now(), itemDate: "", particulars: "", qty: "", rate: "" }]);
+    setActiveRowIndex(nextIndex);
+  };
 
   const removeItem = (index: number) => {
+    if (items.length === 1) {
+      setItems([{ id: Date.now(), itemDate: "", particulars: "", qty: "", rate: "" }]);
+      return;
+    }
     const newItems = [...items];
     newItems.splice(index, 1);
     setItems(newItems);
+    setActiveRowIndex(Math.max(0, index - 1));
   };
 
   const handleItemChange = (index: number, field: string, value: any) => {
@@ -155,14 +193,83 @@ export default function InvoiceGenerator() {
     setItems(newItems);
   };
 
+  // Helper to auto-increment invoice number (e.g. "105" -> "106", "INV-09" -> "INV-10")
+  const getNextInvoiceNumber = (currentNo: string) => {
+    if (!currentNo) return "101";
+    const match = currentNo.match(/(\d+)$/);
+    if (match) {
+      const numStr = match[1];
+      const nextNum = String(Number(numStr) + 1).padStart(numStr.length, "0");
+      return currentNo.slice(0, -numStr.length) + nextNum;
+    }
+    return currentNo;
+  };
+
+  // Helper to save current bill into Recent 10 Bills History
+  const saveCurrentBillToHistory = (silent = false) => {
+    const hasData = formData.customerName.trim() !== "" || items.some(i => i.particulars.trim() !== "");
+    if (!hasData) {
+      if (!silent) alert("⚠️ Please enter Customer Name or Particulars before saving!");
+      return;
+    }
+
+    const total = items.reduce((sum, item) => sum + ((Number(item.qty) || 0) * (Number(item.rate) || 0)), 0);
+    const billRecord = {
+      id: Date.now(),
+      label: `#${formData.invoiceNo || "---"} - ${formData.customerName.split('\n')[0] || "Customer"} (₹${total})`,
+      formData,
+      items,
+      showItemDate,
+      customerMobile,
+      isPaid
+    };
+
+    // Keep maximum 10 recent bills, avoiding duplicate invoiceNo overwrite
+    const filtered = recentBills.filter(b => b.formData.invoiceNo !== formData.invoiceNo || b.formData.customerName !== formData.customerName);
+    const updatedHistory = [billRecord, ...filtered].slice(0, 10);
+    setRecentBills(updatedHistory);
+    localStorage.setItem("invoiceRecentBills", JSON.stringify(updatedHistory));
+
+    if (!silent) {
+      alert("✅ Bill saved to Recent Bills History!");
+    }
+  };
+
+  const loadBillFromHistory = (billId: string) => {
+    if (!billId) return;
+    const found = recentBills.find(b => String(b.id) === billId);
+    if (found) {
+      setFormData(found.formData);
+      setItems(found.items);
+      setShowItemDate(found.showItemDate || false);
+      setCustomerMobile(found.customerMobile || "");
+      setIsPaid(found.isPaid || false);
+    }
+  };
+
+  // Quick Chip Click Handler
+  const handleQuickChipClick = (text: string) => {
+    const targetIdx = activeRowIndex < items.length ? activeRowIndex : items.length - 1;
+    const currentText = items[targetIdx]?.particulars || "";
+    const updatedText = currentText.trim() ? `${currentText}\n• ${text}` : text;
+    handleItemChange(targetIdx, "particulars", updatedText);
+  };
+
   const clearForm = () => {
-    if (window.confirm("Do you want to clear all data and create a new bill?")) {
-      setFormData({ customerName: "", invoiceNo: "", date: getTodayDate() });
+    if (window.confirm("Do you want to clear all data and create a new bill? (Current bill will be auto-saved in Recent Bills)")) {
+      saveCurrentBillToHistory(true);
+      const nextNo = getNextInvoiceNumber(formData.invoiceNo);
+      setFormData({ customerName: "", invoiceNo: nextNo, date: getTodayDate() });
       setItems([{ id: Date.now(), itemDate: "", particulars: "", qty: "", rate: "" }]);
       setShowItemDate(false);
+      setCustomerMobile("");
+      setIsPaid(false);
+      setActiveRowIndex(0);
       localStorage.removeItem("invoiceFormData");
       localStorage.removeItem("invoiceItems");
       localStorage.removeItem("invoiceShowItemDate");
+      localStorage.removeItem("invoiceCustomerMobile");
+      localStorage.removeItem("invoiceIsPaid");
     }
   };
 
@@ -174,6 +281,23 @@ export default function InvoiceGenerator() {
   const upiLink = grandTotal > 0
     ? `upi://pay?pa=shekharkalekar22-1@okhdfcbank&pn=Shekhar%20Tanaji%20Kalekar&am=${grandTotal.toFixed(2)}&cu=INR`
     : `upi://pay?pa=shekharkalekar22-1@okhdfcbank&pn=Shekhar%20Tanaji%20Kalekar&cu=INR`;
+
+  // Direct WhatsApp Message Function (Without saving contact)
+  const sendDirectWhatsApp = () => {
+    const cleanPhone = customerMobile.replace(/\D/g, "");
+    if (cleanPhone.length < 10) {
+      alert("⚠️ Please enter a valid 10-digit Customer WhatsApp Number first!");
+      return;
+    }
+    const finalPhone = cleanPhone.length === 10 ? `91${cleanPhone}` : cleanPhone;
+    const origin = typeof window !== "undefined" ? window.location.origin + window.location.pathname : "";
+    const paymentWebUrl = grandTotal > 0 ? `${origin}?pay=1&am=${grandTotal.toFixed(2)}` : `${origin}?pay=1`;
+
+    const custName = formData.customerName ? formData.customerName.split("\n")[0] : "Customer";
+    const msg = `Hello *${custName}*,\n\nYour repairing bill from *SHEKHAR KALEKAR* is ready.\n*Invoice No:* ${formData.invoiceNo || "---"}\n*Total Amount:* ₹ ${grandTotal.toFixed(2)}\n*Status:* ${isPaid ? "PAID ✅" : "Payment Pending"}\n\n${!isPaid ? `*Click here to Pay via UPI (GPay/PhonePe):*\n${paymentWebUrl}\n\n` : ""}Thank you for your business! 🙏`;
+
+    window.open(`https://wa.me/${finalPhone}?text=${encodeURIComponent(msg)}`, "_blank");
+  };
 
   // PDF madhe QR Code ani UPI ID var clickable HTTPS link basavnyasathi helper function
   const addPdfLinks = (pdf: jsPDF) => {
@@ -210,6 +334,7 @@ export default function InvoiceGenerator() {
   const downloadAsPdf = async () => {
     if (invoiceRef.current === null) return;
     try {
+      saveCurrentBillToHistory(true);
       const dataUrl = await toPng(invoiceRef.current, { cacheBust: true, pixelRatio: 2 });
       const pdf = new jsPDF({
         orientation: "portrait",
@@ -228,6 +353,7 @@ export default function InvoiceGenerator() {
   const sharePdfInvoice = async () => {
     if (invoiceRef.current === null) return;
     try {
+      saveCurrentBillToHistory(true);
       const dataUrl = await toPng(invoiceRef.current, { cacheBust: true, pixelRatio: 2 });
       const pdf = new jsPDF({
         orientation: "portrait",
@@ -255,6 +381,7 @@ export default function InvoiceGenerator() {
   const downloadAsImage = async () => {
     if (invoiceRef.current === null) return;
     try {
+      saveCurrentBillToHistory(true);
       const dataUrl = await toPng(invoiceRef.current, { cacheBust: true, pixelRatio: 2 });
       const link = document.createElement("a");
       link.download = `Invoice_${formData.invoiceNo || "Bill"}.png`;
@@ -266,6 +393,7 @@ export default function InvoiceGenerator() {
   const shareInvoice = async () => {
     if (invoiceRef.current === null) return;
     try {
+      saveCurrentBillToHistory(true);
       const dataUrl = await toPng(invoiceRef.current, { cacheBust: true, pixelRatio: 2 });
       const response = await fetch(dataUrl);
       const blob = await response.blob();
@@ -412,10 +540,30 @@ export default function InvoiceGenerator() {
 
           {/* Input Form */}
           <div className="w-full max-w-4xl bg-white p-6 rounded-xl shadow-lg mb-10 print:hidden border-t-4 border-blue-500 relative">
-            <div className="flex justify-between items-center border-b pb-2 mb-6">
+            <div className="flex flex-wrap justify-between items-center border-b pb-3 mb-6 gap-2">
               <h2 className="text-xl font-bold text-slate-800">Enter Invoice Details</h2>
 
-              <div className="flex gap-2">
+              <div className="flex flex-wrap items-center gap-2">
+                {/* Recent 10 Bills Dropdown */}
+                {recentBills.length > 0 && (
+                  <select
+                    onChange={(e) => loadBillFromHistory(e.target.value)}
+                    defaultValue=""
+                    className="text-xs bg-amber-50 border border-amber-300 text-amber-900 px-2 py-2 rounded font-bold cursor-pointer"
+                  >
+                    <option value="" disabled>📂 Recent Bills ({recentBills.length})</option>
+                    {recentBills.map((b) => (
+                      <option key={b.id} value={b.id}>{b.label}</option>
+                    ))}
+                  </select>
+                )}
+
+                <button 
+                  onClick={() => saveCurrentBillToHistory(false)}
+                  className="text-xs bg-blue-100 text-blue-700 px-3 py-2 rounded hover:bg-blue-200 font-bold transition-all uppercase tracking-wider"
+                >
+                  💾 Save Bill
+                </button>
                 <button 
                   onClick={lockApp}
                   className="text-xs bg-red-100 text-red-700 px-3 py-2 rounded hover:bg-red-200 font-bold transition-all uppercase tracking-wider flex items-center"
@@ -426,7 +574,7 @@ export default function InvoiceGenerator() {
                   onClick={clearForm}
                   className="text-xs bg-gray-200 text-gray-700 px-3 py-2 rounded hover:bg-gray-300 font-bold transition-all uppercase tracking-wider"
                 >
-                  ↻ Clear Form
+                  ↻ New Bill (+1)
                 </button>
               </div>
             </div>
@@ -439,14 +587,31 @@ export default function InvoiceGenerator() {
               <div>
                 <label className="block text-sm font-medium text-gray-700">Invoice No. / Date</label>
                 <div className="flex gap-2">
-                  <input type="text" placeholder="No." className="w-1/2 border p-2 rounded mt-1 text-black" value={formData.invoiceNo} onChange={(e) => setFormData({...formData, invoiceNo: e.target.value})} />
+                  <input type="text" placeholder="No." className="w-1/2 border p-2 rounded mt-1 text-black font-bold" value={formData.invoiceNo} onChange={(e) => setFormData({...formData, invoiceNo: e.target.value})} />
                   <input type="date" className="w-1/2 border p-2 rounded mt-1 text-black" value={formData.date} onChange={(e) => setFormData({...formData, date: e.target.value})} />
                 </div>
               </div>
             </div>
 
+            {/* Quick Particular Chips */}
             <div className="mt-4">
-              <label className="block text-sm font-medium text-gray-700 mb-1">Particulars (Items)</label>
+              <div className="flex justify-between items-center mb-1">
+                <label className="block text-sm font-medium text-gray-700">Particulars (Items)</label>
+                <span className="text-[11px] text-gray-500">Tap a chip below to quick-add into active row:</span>
+              </div>
+              <div className="flex flex-wrap gap-1.5 mb-3">
+                {QUICK_ITEMS.map((chip) => (
+                  <button
+                    key={chip}
+                    type="button"
+                    onClick={() => handleQuickChipClick(chip)}
+                    className="text-xs bg-slate-100 hover:bg-blue-100 text-slate-700 hover:text-blue-800 border border-slate-300 px-2.5 py-1 rounded-full font-medium transition-colors"
+                  >
+                    + {chip}
+                  </button>
+                ))}
+              </div>
+
               {items.map((item, index) => (
                 <div key={item.id} className="flex gap-2 mb-2 items-start">
                   {showItemDate && (
@@ -455,9 +620,10 @@ export default function InvoiceGenerator() {
                   {/* Particulars Input changed to Textarea to support new lines */}
                   <textarea 
                     placeholder="Particulars (Press Enter for new line)" 
-                    className="flex-1 border p-2 rounded text-black min-w-0 resize-y" 
+                    className={`flex-1 border p-2 rounded text-black min-w-0 resize-y ${activeRowIndex === index ? 'border-blue-500 ring-1 ring-blue-300' : ''}`} 
                     rows={2}
                     value={item.particulars} 
+                    onFocus={() => setActiveRowIndex(index)}
                     onChange={(e) => handleItemChange(index, 'particulars', e.target.value)} 
                   />
                   <input type="number" placeholder="Qty" className="w-20 border p-2 rounded text-black flex-shrink-0" value={item.qty} onChange={(e) => handleItemChange(index, 'qty', e.target.value === "" ? "" : Number(e.target.value))} />
@@ -465,22 +631,57 @@ export default function InvoiceGenerator() {
                   <button onClick={() => removeItem(index)} className="bg-red-500 text-white px-3 py-1 rounded font-bold hover:bg-red-700 flex items-center justify-center text-lg flex-shrink-0">-</button>
                 </div>
               ))}
-              <div className="flex gap-2 mt-2">
+              <div className="flex flex-wrap items-center gap-2 mt-2">
                 <button onClick={addItem} className="text-sm bg-blue-100 text-blue-700 px-3 py-1 rounded font-bold hover:bg-blue-200">+ Add Row</button>
                 <button onClick={() => setShowItemDate(!showItemDate)} className="text-sm bg-purple-100 text-purple-700 px-3 py-1 rounded font-bold hover:bg-purple-200 border border-purple-300">
                   {showItemDate ? "Hide Date Column" : "Show Date Column"}
                 </button>
+
+                {/* Paid Stamp Checkbox */}
+                <label className="flex items-center gap-1.5 text-sm bg-green-50 text-green-800 px-3 py-1 rounded font-bold border border-green-300 cursor-pointer ml-auto">
+                  <input 
+                    type="checkbox" 
+                    checked={isPaid} 
+                    onChange={(e) => setIsPaid(e.target.checked)} 
+                    className="w-4 h-4 accent-green-600 cursor-pointer"
+                  />
+                  ✅ Show PAID Stamp
+                </label>
               </div>
             </div>
 
-            <div className="mt-4">
-              <label className="block text-sm font-medium text-gray-700">Amount in Words (Auto Generated)</label>
-              <input type="text" className="w-full border p-2 rounded mt-1 text-black bg-gray-100 font-bold" value={amountInWordsAuto} readOnly />
+            {/* Amount in Words + Direct WhatsApp Bar */}
+            <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
+              <div className="md:col-span-2">
+                <label className="block text-sm font-medium text-gray-700">Amount in Words (Auto Generated)</label>
+                <input type="text" className="w-full border p-2 rounded mt-1 text-black bg-gray-100 font-bold" value={amountInWordsAuto} readOnly />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700">Customer WhatsApp No. (Optional)</label>
+                <div className="flex gap-2 mt-1">
+                  <input 
+                    type="tel" 
+                    placeholder="10-digit Mobile" 
+                    maxLength={10}
+                    className="w-full border p-2 rounded text-black" 
+                    value={customerMobile} 
+                    onChange={(e) => setCustomerMobile(e.target.value)} 
+                  />
+                  <button
+                    type="button"
+                    onClick={sendDirectWhatsApp}
+                    className="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-2 rounded font-bold text-xs uppercase tracking-wider shrink-0 shadow"
+                    title="Send Bill Message & Payment Link directly on WhatsApp"
+                  >
+                    💬 WhatsApp
+                  </button>
+                </div>
+              </div>
             </div>
 
             {/* 3 Main Action Buttons */}
             <div className="flex flex-wrap gap-4 mt-8">
-              <button onClick={() => window.print()} className="flex-1 min-w-[150px] bg-blue-600 text-white py-3 rounded-lg font-bold hover:bg-blue-700 transition-all shadow-md uppercase tracking-wider flex justify-center items-center gap-2">
+              <button onClick={() => { saveCurrentBillToHistory(true); window.print(); }} className="flex-1 min-w-[150px] bg-blue-600 text-white py-3 rounded-lg font-bold hover:bg-blue-700 transition-all shadow-md uppercase tracking-wider flex justify-center items-center gap-2">
                 🖨️ Print / PDF
               </button>
               <button onClick={() => setActionType('download')} className="flex-1 min-w-[150px] bg-green-600 text-white py-3 rounded-lg font-bold hover:bg-green-700 transition-all shadow-md uppercase tracking-wider flex justify-center items-center gap-2">
@@ -536,7 +737,7 @@ export default function InvoiceGenerator() {
           {/* --- Actual Bill Template (Wrapped for Mobile Responsiveness) --- */}
           <div className="w-full overflow-x-auto print:overflow-visible flex justify-start md:justify-center pb-8 print:pb-0">
             <div className="min-w-[210mm] shrink-0">
-              <div ref={invoiceRef} className="w-[210mm] min-h-[297mm] print:min-h-[290mm] print:h-[290mm] bg-white border border-gray-300 p-10 print:p-8 text-black shadow-2xl print:shadow-none print:m-0 print:border-none flex flex-col">
+              <div ref={invoiceRef} className="w-[210mm] min-h-[297mm] print:min-h-[290mm] print:h-[290mm] bg-white border border-gray-300 p-10 print:p-8 text-black shadow-2xl print:shadow-none print:m-0 print:border-none flex flex-col relative">
                 <div className="text-right text-xs font-semibold uppercase">Mobile : 9702064094</div>
                 <div className="text-center mb-6 border-b-2 border-black pb-4">
                   <h1 className="text-5xl font-black italic tracking-tighter text-gray-900 uppercase">SHEKHAR KALEKAR</h1>
@@ -606,6 +807,13 @@ export default function InvoiceGenerator() {
                     </tr>
                   </tfoot>
                 </table>
+
+                {/* Optional Rubber PAID Stamp */}
+                {isPaid && (
+                  <div className="absolute right-14 bottom-48 border-4 border-green-600 text-green-600 px-6 py-1.5 rounded-lg font-black text-3xl uppercase tracking-[0.25em] -rotate-12 opacity-80 pointer-events-none select-none shadow-sm">
+                    PAID
+                  </div>
+                )}
 
                 {/* Footer Area */}
                 <div className="mt-8 flex justify-between items-end">
