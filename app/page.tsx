@@ -73,6 +73,7 @@ export default function InvoiceGenerator() {
   const [customerMobile, setCustomerMobile] = useState("");
   const [isPaid, setIsPaid] = useState(false);
   const [recentBills, setRecentBills] = useState<any[]>([]);
+  const [showRecentDropdown, setShowRecentDropdown] = useState(false);
   const [activeRowIndex, setActiveRowIndex] = useState<number>(0);
 
   useEffect(() => {
@@ -126,7 +127,13 @@ export default function InvoiceGenerator() {
     if (savedIsPaid) setIsPaid(JSON.parse(savedIsPaid));
 
     const savedHistory = localStorage.getItem("invoiceRecentBills");
-    if (savedHistory) setRecentBills(JSON.parse(savedHistory));
+    if (savedHistory) {
+      try {
+        setRecentBills(JSON.parse(savedHistory));
+      } catch (e) {
+        setRecentBills([]);
+      }
+    }
   }, []);
 
   useEffect(() => {
@@ -214,36 +221,57 @@ export default function InvoiceGenerator() {
     }
 
     const total = items.reduce((sum, item) => sum + ((Number(item.qty) || 0) * (Number(item.rate) || 0)), 0);
+    const savedDateStr = formData.date ? formData.date.split('-').reverse().join('/') : "";
     const billRecord = {
       id: Date.now(),
-      label: `#${formData.invoiceNo || "---"} - ${formData.customerName.split('\n')[0] || "Customer"} (₹${total})`,
-      formData,
-      items,
+      label: `#${formData.invoiceNo || "---"} | ${formData.customerName.split('\n')[0] || "Customer"} | ₹${total} (${savedDateStr})`,
+      formData: { ...formData },
+      items: items.map(i => ({ ...i })),
       showItemDate,
       customerMobile,
       isPaid
     };
 
-    // Keep maximum 10 recent bills, avoiding duplicate invoiceNo overwrite
-    const filtered = recentBills.filter(b => b.formData.invoiceNo !== formData.invoiceNo || b.formData.customerName !== formData.customerName);
-    const updatedHistory = [billRecord, ...filtered].slice(0, 10);
+    // Keep maximum 50 recent bills, updating if same invoiceNo & customerName
+    const currentList = Array.isArray(recentBills) ? recentBills : [];
+    const filtered = currentList.filter(b => !(b.formData?.invoiceNo === formData.invoiceNo && b.formData?.customerName === formData.customerName));
+    const updatedHistory = [billRecord, ...filtered].slice(0, 50);
+    
     setRecentBills(updatedHistory);
     localStorage.setItem("invoiceRecentBills", JSON.stringify(updatedHistory));
 
     if (!silent) {
-      alert("✅ Bill saved to Recent Bills History!");
+      alert(`✅ Bill #${formData.invoiceNo || "---"} saved in Recent Bills dropdown!`);
     }
   };
 
   const loadBillFromHistory = (billId: string) => {
     if (!billId) return;
-    const found = recentBills.find(b => String(b.id) === billId);
+    const found = recentBills.find(b => String(b.id) === String(billId));
     if (found) {
       setFormData(found.formData);
       setItems(found.items);
       setShowItemDate(found.showItemDate || false);
       setCustomerMobile(found.customerMobile || "");
       setIsPaid(found.isPaid || false);
+      setShowRecentDropdown(false);
+    }
+  };
+
+  // Delete a single bill from history
+  const deleteSingleBillFromHistory = (billId: any, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const updatedHistory = recentBills.filter(b => String(b.id) !== String(billId));
+    setRecentBills(updatedHistory);
+    localStorage.setItem("invoiceRecentBills", JSON.stringify(updatedHistory));
+  };
+
+  const clearSavedHistory = () => {
+    if (recentBills.length === 0) return;
+    if (window.confirm("Do you want to delete all saved Recent Bills history?")) {
+      setRecentBills([]);
+      localStorage.removeItem("invoiceRecentBills");
+      setShowRecentDropdown(false);
     }
   };
 
@@ -544,19 +572,62 @@ export default function InvoiceGenerator() {
               <h2 className="text-xl font-bold text-slate-800">Enter Invoice Details</h2>
 
               <div className="flex flex-wrap items-center gap-2">
-                {/* Recent 10 Bills Dropdown */}
-                {recentBills.length > 0 && (
-                  <select
-                    onChange={(e) => loadBillFromHistory(e.target.value)}
-                    defaultValue=""
-                    className="text-xs bg-amber-50 border border-amber-300 text-amber-900 px-2 py-2 rounded font-bold cursor-pointer"
+                {/* Custom Recent Bills Dropdown with Individual Delete Option */}
+                <div className="relative">
+                  <button
+                    type="button"
+                    onClick={() => setShowRecentDropdown(!showRecentDropdown)}
+                    className="text-xs bg-amber-50 hover:bg-amber-100 border border-amber-300 text-amber-900 px-3 py-2 rounded font-bold cursor-pointer flex items-center gap-1.5 transition-colors"
                   >
-                    <option value="" disabled>📂 Recent Bills ({recentBills.length})</option>
-                    {recentBills.map((b) => (
-                      <option key={b.id} value={b.id}>{b.label}</option>
-                    ))}
-                  </select>
-                )}
+                    📂 Recent Bills ({recentBills.length}) <span className="text-[10px]">▼</span>
+                  </button>
+
+                  {showRecentDropdown && (
+                    <>
+                      {/* Invisible backdrop to close dropdown when clicking outside */}
+                      <div 
+                        className="fixed inset-0 z-40" 
+                        onClick={() => setShowRecentDropdown(false)} 
+                      />
+                      <div className="absolute right-0 mt-1 w-72 sm:w-80 bg-white border border-gray-200 rounded-lg shadow-xl z-50 max-h-64 overflow-y-auto">
+                        {recentBills.length === 0 ? (
+                          <div className="p-3 text-xs text-gray-500 text-center font-medium">
+                            No saved bills yet (Click Save Bill)
+                          </div>
+                        ) : (
+                          <>
+                            {recentBills.map((b) => (
+                              <div
+                                key={b.id}
+                                onClick={() => loadBillFromHistory(String(b.id))}
+                                className="flex items-center justify-between px-3 py-2.5 hover:bg-blue-50 border-b border-gray-100 cursor-pointer text-xs group"
+                              >
+                                <span className="truncate font-semibold text-gray-800 pr-2 group-hover:text-blue-700">
+                                  {b.label}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={(e) => deleteSingleBillFromHistory(b.id, e)}
+                                  title="Delete this bill"
+                                  className="text-red-500 hover:text-white hover:bg-red-500 px-2 py-0.5 rounded font-bold transition-colors shrink-0"
+                                >
+                                  ✕
+                                </button>
+                              </div>
+                            ))}
+                            <button
+                              type="button"
+                              onClick={clearSavedHistory}
+                              className="w-full text-center py-2 text-xs text-red-600 hover:bg-red-50 font-bold uppercase tracking-wider transition-colors"
+                            >
+                              🗑️ Clear All Bills
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    </>
+                  )}
+                </div>
 
                 <button 
                   onClick={() => saveCurrentBillToHistory(false)}
