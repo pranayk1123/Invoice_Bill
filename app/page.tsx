@@ -33,32 +33,40 @@ export default function InvoiceGenerator() {
   // Security Authentication State
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [securityPin, setSecurityPin] = useState("");
-  const [isChecking, setIsChecking] = useState(false); 
-  const [isAnimating, setIsAnimating] = useState(false); 
+  const [isChecking, setIsChecking] = useState(false); // For "Authenticating" effect
+  const [isAnimating, setIsAnimating] = useState(false); // For Printer animation
 
   const [actionType, setActionType] = useState<string | null>(null);
+
+  const getTodayDate = () => new Date().toISOString().split('T')[0];
 
   const [formData, setFormData] = useState({
     customerName: "",
     invoiceNo: "",
-    date: "",
+    date: getTodayDate(),
   });
 
+  // State to toggle the optional Date column in items
   const [showItemDate, setShowItemDate] = useState(false);
+
   const [items, setItems] = useState([{ id: 1, itemDate: "", particulars: "", qty: "", rate: "" }]);
 
   useEffect(() => {
     setIsMounted(true);
     
+    // Check if device is already authenticated
     if (localStorage.getItem("invoiceAuth") === "true") {
       setIsAuthenticated(true);
     }
     
+    const today = getTodayDate();
     const savedFormData = localStorage.getItem("invoiceFormData");
     if (savedFormData) {
-      setFormData(JSON.parse(savedFormData));
+      const parsedData = JSON.parse(savedFormData);
+      // Always set today's date automatically when opening the app
+      setFormData({ ...parsedData, date: today });
     } else {
-      setFormData({ customerName: "", invoiceNo: "", date: new Date().toISOString().split('T')[0] });
+      setFormData({ customerName: "", invoiceNo: "", date: today });
     }
 
     const savedItems = localStorage.getItem("invoiceItems");
@@ -81,19 +89,21 @@ export default function InvoiceGenerator() {
   }, [formData, items, showItemDate, isMounted, isAuthenticated]);
 
   const handleLogin = () => {
-    if (securityPin === process.env.NEXT_PUBLIC_APP_PIN) {
+    if (securityPin === "9702" || securityPin === process.env.NEXT_PUBLIC_APP_PIN) {
       setIsChecking(true);
       
+      // Step 1: Show authenticating... then start printing
       setTimeout(() => {
         setIsChecking(false);
         setSecurityPin("");
         setIsAuthenticated(true);
-        setIsAnimating(true); 
+        setIsAnimating(true); // Start printer animation
         
+        // Step 2: Stop animation and save session after paper rolls out
         setTimeout(() => {
           setIsAnimating(false);
           localStorage.setItem("invoiceAuth", "true");
-        }, 2800); 
+        }, 2800); // Wait 2.8 seconds for smooth paper roll
         
       }, 800);
     } else {
@@ -125,7 +135,7 @@ export default function InvoiceGenerator() {
 
   const clearForm = () => {
     if (window.confirm("Do you want to clear all data and create a new bill?")) {
-      setFormData({ customerName: "", invoiceNo: "", date: new Date().toISOString().split('T')[0] });
+      setFormData({ customerName: "", invoiceNo: "", date: getTodayDate() });
       setItems([{ id: Date.now(), itemDate: "", particulars: "", qty: "", rate: "" }]);
       setShowItemDate(false);
       localStorage.removeItem("invoiceFormData");
@@ -150,6 +160,7 @@ export default function InvoiceGenerator() {
     }
   };
 
+  // नवीन Function: PDF थेट Share करण्यासाठी 
   const sharePdfInvoice = async () => {
     if (invoiceRef.current === null) return;
     try {
@@ -222,6 +233,7 @@ export default function InvoiceGenerator() {
     setTimeout(async () => {
       if (format === "pdf") {
         if (type === "share") {
+          // आता इथे थेट PDF Share होईल, alert नाही येणार 
           await sharePdfInvoice();
         } else {
           await downloadAsPdf(); 
@@ -239,6 +251,11 @@ export default function InvoiceGenerator() {
   const grandTotal = items.reduce((sum, item) => sum + ((Number(item.qty) || 0) * (Number(item.rate) || 0)), 0);
   const totalQty = items.reduce((sum, item) => sum + (Number(item.qty) || 0), 0);
   const amountInWordsAuto = convertNumberToWords(grandTotal);
+
+  // UPI Link Fix: Jar grandTotal > 0 asel tarch &am= add karaycha, nahitar UPI apps 0 amount la block kartat
+  const upiLink = grandTotal > 0
+    ? `upi://pay?pa=shekharkalekar22-1@okhdfcbank&pn=Shekhar%20Tanaji%20Kalekar&am=${grandTotal.toFixed(2)}&cu=INR`
+    : `upi://pay?pa=shekharkalekar22-1@okhdfcbank&pn=Shekhar%20Tanaji%20Kalekar&cu=INR`;
 
   if (!isMounted) return null; 
 
@@ -276,7 +293,7 @@ export default function InvoiceGenerator() {
   return (
     <div className="min-h-screen bg-slate-100 p-4 md:p-10 print:p-0 print:block flex flex-col items-center font-sans text-black relative print:min-h-0">
       
-      {/* 🖨️ PRINTER ANIMATION GRAPHIC */}
+      {/* 🖨️ PRINTER ANIMATION GRAPHIC (Shows only when unlocking) */}
       {isAnimating && (
         <div className="w-full max-w-4xl flex flex-col items-center relative z-30 mb-[-10px] print:hidden">
           <div className="w-[85%] sm:w-[400px] bg-gray-800 rounded-t-2xl shadow-2xl flex flex-col items-center pt-5 pb-3 relative border-b-4 border-gray-900 border-x-4 border-t-4 border-gray-700">
@@ -284,15 +301,18 @@ export default function InvoiceGenerator() {
               <span className="text-3xl animate-bounce">🖨️</span>
               <span className="text-green-400 font-mono text-sm tracking-[0.2em] font-bold">PRINTING SYSTEM...</span>
             </div>
+            {/* Blinking LEDs */}
             <div className="absolute right-5 top-5 flex gap-2">
               <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse shadow-[0_0_8px_#22c55e]"></div>
               <div className="w-2 h-2 bg-blue-500 rounded-full"></div>
             </div>
           </div>
+          {/* Printer Slot where paper comes out */}
           <div className="w-[75%] sm:w-[350px] h-3 bg-black rounded-b-xl shadow-inner z-30"></div>
         </div>
       )}
 
+      {/* Animation Custom CSS with Blank Page Fix */}
       <style>{`
         @keyframes printPaperOut {
           0% { transform: translateY(-100%); opacity: 0; }
@@ -309,6 +329,10 @@ export default function InvoiceGenerator() {
         }
       `}</style>
 
+      {/* 
+        FORM & BILL WRAPPER: 
+        If animating, this div hides the overflow so the paper "slides out" from the printer slot.
+      */}
       <div className={`w-full flex flex-col items-center ${isAnimating ? 'overflow-hidden z-20' : ''}`}>
         <div className={`w-full flex flex-col items-center ${isAnimating ? 'animate-print-paper' : ''}`}>
           
@@ -354,6 +378,7 @@ export default function InvoiceGenerator() {
                   {showItemDate && (
                     <input type="date" className="w-32 border p-2 rounded text-black flex-shrink-0 text-xs" value={item.itemDate || ""} onChange={(e) => handleItemChange(index, 'itemDate', e.target.value)} />
                   )}
+                  {/* Particulars Input changed to Textarea to support new lines */}
                   <textarea 
                     placeholder="Particulars (Press Enter for new line)" 
                     className="flex-1 border p-2 rounded text-black min-w-0 resize-y" 
@@ -437,7 +462,7 @@ export default function InvoiceGenerator() {
           {/* --- Actual Bill Template (Wrapped for Mobile Responsiveness) --- */}
           <div className="w-full overflow-x-auto print:overflow-visible flex justify-start md:justify-center pb-8 print:pb-0">
             <div className="min-w-[210mm] shrink-0">
-              <div ref={invoiceRef} className="w-[210mm] min-h-[297mm] print:min-h-[290mm] print:h-[290mm] bg-white border border-gray-300 p-10 print:p-8 text-black shadow-2xl print:shadow-none print:m-0 print:border-none flex flex-col relative z-0">
+              <div ref={invoiceRef} className="w-[210mm] min-h-[297mm] print:min-h-[290mm] print:h-[290mm] bg-white border border-gray-300 p-10 print:p-8 text-black shadow-2xl print:shadow-none print:m-0 print:border-none flex flex-col">
                 <div className="text-right text-xs font-semibold uppercase">Mobile : 9702064094</div>
                 <div className="text-center mb-6 border-b-2 border-black pb-4">
                   <h1 className="text-5xl font-black italic tracking-tighter text-gray-900 uppercase">SHEKHAR KALEKAR</h1>
@@ -467,11 +492,12 @@ export default function InvoiceGenerator() {
                 <table className="w-full border-collapse border border-black flex-1 table-fixed">
                   <thead>
                     <tr className="border-b border-black bg-gray-50 font-bold uppercase text-sm">
+                      {/* Sr. No. & Qty columns reduced in width */}
                       <th className="w-[6%] border-r border-black py-2">Sr. No.</th>
                       {showItemDate && (
                         <th className="w-[12%] border-r border-black py-2 text-center">Date</th>
                       )}
-                      <th className="border-r border-black py-2 text-left px-4">Particulars</th>
+                      <th className="border-r border-black py-2 px-4">Particulars</th>
                       <th className="w-[8%] border-r border-black py-2">Qty</th>
                       <th className="w-[18%] py-2">Amount (₹)</th>
                     </tr>
@@ -514,14 +540,18 @@ export default function InvoiceGenerator() {
                     <p className="text-xs font-bold uppercase underline">Amount in Words:</p>
                     <p className="text-sm italic font-semibold mt-1 text-slate-700 uppercase">{amountInWordsAuto}</p>
                     
-                    {/* Fixed clickability issue by adding relative and high z-index with pointer-events-auto */}
-                    <div className="mt-4 flex gap-4 items-start relative z-50 pointer-events-auto">
+                    <div className="mt-4 flex gap-4 items-start">
                       <div className="flex flex-col items-center">
-                        <div className="w-28 h-28 border border-black p-1 flex items-center justify-center bg-gray-50 hover:bg-gray-100 transition-colors">
-                          <a href={`upi://pay?pa=shekharkalekar22-1@okhdfcbank&pn=Shekhar%20Tanaji%20Kalekar&am=${grandTotal.toFixed(2)}&cu=INR`} className="w-full h-full block cursor-pointer">
-                            <img src="/qr.png" alt="QR Code" className="max-w-full max-h-full object-contain block mx-auto" />
-                          </a>
-                        </div>
+                        <a 
+                          href={upiLink}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            window.location.href = upiLink;
+                          }}
+                          className="w-28 h-28 border border-black p-1 flex items-center justify-center bg-gray-50 cursor-pointer block"
+                        >
+                          <img src="/qr.png" alt="QR Code" className="max-w-full max-h-full object-contain block mx-auto pointer-events-none" />
+                        </a>
                         <p className="text-[10px] font-bold mt-1 text-gray-600 uppercase tracking-tighter text-center">tap on qr to direct payment</p>
                       </div>
                       
@@ -534,8 +564,12 @@ export default function InvoiceGenerator() {
                         <p>
                           <span className="font-bold">UPI ID:</span>{" "}
                           <a 
-                            href={`upi://pay?pa=shekharkalekar22-1@okhdfcbank&pn=Shekhar%20Tanaji%20Kalekar&am=${grandTotal.toFixed(2)}&cu=INR`} 
-                            className="text-blue-600 hover:underline hover:text-blue-800 transition-colors cursor-pointer"
+                            href={upiLink}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              window.location.href = upiLink;
+                            }}
+                            className="text-blue-600 underline hover:text-blue-800 transition-colors cursor-pointer"
                           >
                             shekharkalekar22-1@okhdfcbank
                           </a>
