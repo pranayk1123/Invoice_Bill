@@ -28,6 +28,8 @@ const convertNumberToWords = (amount: number) => {
 
 export default function InvoiceGenerator() {
   const invoiceRef = useRef<HTMLDivElement>(null); 
+  const qrLinkRef = useRef<HTMLAnchorElement>(null);
+  const upiTextLinkRef = useRef<HTMLAnchorElement>(null);
   const [isMounted, setIsMounted] = useState(false);
   
   // Security Authentication State
@@ -144,6 +146,41 @@ export default function InvoiceGenerator() {
     }
   };
 
+  const grandTotal = items.reduce((sum, item) => sum + ((Number(item.qty) || 0) * (Number(item.rate) || 0)), 0);
+  const totalQty = items.reduce((sum, item) => sum + (Number(item.qty) || 0), 0);
+  const amountInWordsAuto = convertNumberToWords(grandTotal);
+
+  // UPI Link Fix: Jar grandTotal > 0 asel tarch &am= add karaycha, nahitar UPI apps 0 amount la block kartat
+  const upiLink = grandTotal > 0
+    ? `upi://pay?pa=shekharkalekar22-1@okhdfcbank&pn=Shekhar%20Tanaji%20Kalekar&am=${grandTotal.toFixed(2)}&cu=INR`
+    : `upi://pay?pa=shekharkalekar22-1@okhdfcbank&pn=Shekhar%20Tanaji%20Kalekar&cu=INR`;
+
+  // PDF madhe QR Code ani UPI ID var clickable link basavnyasathi helper function
+  const addPdfLinks = (pdf: jsPDF) => {
+    if (!invoiceRef.current) return;
+    const invoiceRect = invoiceRef.current.getBoundingClientRect();
+    const scaleX = 210 / invoiceRect.width;
+    const scaleY = 297 / invoiceRect.height;
+
+    if (qrLinkRef.current) {
+      const qrRect = qrLinkRef.current.getBoundingClientRect();
+      const x = (qrRect.left - invoiceRect.left) * scaleX;
+      const y = (qrRect.top - invoiceRect.top) * scaleY;
+      const w = qrRect.width * scaleX;
+      const h = qrRect.height * scaleY;
+      pdf.link(x, y, w, h, { url: upiLink });
+    }
+
+    if (upiTextLinkRef.current) {
+      const upiRect = upiTextLinkRef.current.getBoundingClientRect();
+      const x = (upiRect.left - invoiceRect.left) * scaleX;
+      const y = (upiRect.top - invoiceRect.top) * scaleY;
+      const w = upiRect.width * scaleX;
+      const h = upiRect.height * scaleY;
+      pdf.link(x, y, w, h, { url: upiLink });
+    }
+  };
+
   const downloadAsPdf = async () => {
     if (invoiceRef.current === null) return;
     try {
@@ -154,6 +191,7 @@ export default function InvoiceGenerator() {
         format: "a4"
       });
       pdf.addImage(dataUrl, 'PNG', 0, 0, 210, 297);
+      addPdfLinks(pdf); // Adds clickable links inside PDF
       pdf.save(`Invoice_${formData.invoiceNo || "Bill"}.pdf`);
     } catch (err) { 
       console.error("Oops, something went wrong with PDF!", err); 
@@ -171,6 +209,7 @@ export default function InvoiceGenerator() {
         format: "a4"
       });
       pdf.addImage(dataUrl, 'PNG', 0, 0, 210, 297);
+      addPdfLinks(pdf); // Adds clickable links inside shared PDF
       
       const pdfBlob = pdf.output('blob');
       const file = new File([pdfBlob], `Invoice_${formData.invoiceNo || "Bill"}.pdf`, { type: 'application/pdf' });
@@ -247,15 +286,6 @@ export default function InvoiceGenerator() {
       }
     }, 100);
   };
-
-  const grandTotal = items.reduce((sum, item) => sum + ((Number(item.qty) || 0) * (Number(item.rate) || 0)), 0);
-  const totalQty = items.reduce((sum, item) => sum + (Number(item.qty) || 0), 0);
-  const amountInWordsAuto = convertNumberToWords(grandTotal);
-
-  // UPI Link Fix: Jar grandTotal > 0 asel tarch &am= add karaycha, nahitar UPI apps 0 amount la block kartat
-  const upiLink = grandTotal > 0
-    ? `upi://pay?pa=shekharkalekar22-1@okhdfcbank&pn=Shekhar%20Tanaji%20Kalekar&am=${grandTotal.toFixed(2)}&cu=INR`
-    : `upi://pay?pa=shekharkalekar22-1@okhdfcbank&pn=Shekhar%20Tanaji%20Kalekar&cu=INR`;
 
   if (!isMounted) return null; 
 
@@ -543,6 +573,7 @@ export default function InvoiceGenerator() {
                     <div className="mt-4 flex gap-4 items-start">
                       <div className="flex flex-col items-center">
                         <a 
+                          ref={qrLinkRef}
                           href={upiLink}
                           onClick={(e) => {
                             e.stopPropagation();
@@ -564,6 +595,7 @@ export default function InvoiceGenerator() {
                         <p>
                           <span className="font-bold">UPI ID:</span>{" "}
                           <a 
+                            ref={upiTextLinkRef}
                             href={upiLink}
                             onClick={(e) => {
                               e.stopPropagation();
