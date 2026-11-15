@@ -155,6 +155,9 @@ export default function InvoiceGenerator() {
     ? `upi://pay?pa=shekharkalekar22-1@okhdfcbank&pn=Shekhar%20Tanaji%20Kalekar&am=${grandTotal.toFixed(2)}&cu=INR`
     : `upi://pay?pa=shekharkalekar22-1@okhdfcbank&pn=Shekhar%20Tanaji%20Kalekar&cu=INR`;
 
+  // Dynamic QR Image URL that embeds the exact Grand Total inside the QR code itself for PDF scanning
+  const dynamicQrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=250x250&margin=1&data=${encodeURIComponent(upiLink)}`;
+
   // PDF madhe QR Code ani UPI ID var clickable link basavnyasathi helper function
   const addPdfLinks = (pdf: jsPDF) => {
     if (!invoiceRef.current) return;
@@ -169,6 +172,7 @@ export default function InvoiceGenerator() {
       const w = qrRect.width * scaleX;
       const h = qrRect.height * scaleY;
       pdf.link(x, y, w, h, { url: upiLink });
+      pdf.textWithLink("   ", x + 2, y + h / 2, { url: upiLink });
     }
 
     if (upiTextLinkRef.current) {
@@ -178,6 +182,7 @@ export default function InvoiceGenerator() {
       const w = upiRect.width * scaleX;
       const h = upiRect.height * scaleY;
       pdf.link(x, y, w, h, { url: upiLink });
+      pdf.textWithLink("                    ", x, y + h - 1, { url: upiLink });
     }
   };
 
@@ -581,7 +586,13 @@ export default function InvoiceGenerator() {
                           }}
                           className="w-28 h-28 border border-black p-1 flex items-center justify-center bg-gray-50 cursor-pointer block"
                         >
-                          <img src="/qr.png" alt="QR Code" className="max-w-full max-h-full object-contain block mx-auto pointer-events-none" />
+                          <img 
+                            src={dynamicQrUrl} 
+                            crossOrigin="anonymous"
+                            onError={(e) => { e.currentTarget.src = "/qr.png"; }}
+                            alt="QR Code" 
+                            className="max-w-full max-h-full object-contain block mx-auto pointer-events-none" 
+                          />
                         </a>
                         <p className="text-[10px] font-bold mt-1 text-gray-600 uppercase tracking-tighter text-center">tap on qr to direct payment</p>
                       </div>
